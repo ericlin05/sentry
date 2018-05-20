@@ -37,7 +37,6 @@ import org.apache.sentry.binding.hive.conf.InvalidConfigurationException;
 import org.apache.sentry.core.common.Subject;
 import org.apache.sentry.core.model.db.AccessConstants;
 import org.apache.sentry.core.model.db.AccessURI;
-import org.apache.sentry.core.model.db.Column;
 import org.apache.sentry.core.model.db.DBModelAuthorizable;
 import org.apache.sentry.core.model.db.Database;
 import org.apache.sentry.core.model.db.Server;
@@ -75,9 +74,6 @@ public class TestHiveAuthzBindings {
   // Tables
   private static final String PURCHASES_TAB = "purchases";
 
-  // Columns
-  private static final String AGE_COL = "age";
-
   // Entities
   private List<List<DBModelAuthorizable>> inputTabHierarcyList = new ArrayList<List<DBModelAuthorizable>>();
   private List<List<DBModelAuthorizable>> outputTabHierarcyList = new ArrayList<List<DBModelAuthorizable>>();
@@ -95,6 +91,8 @@ public class TestHiveAuthzBindings {
       HiveAuthzPrivilegesMap.getHiveAuthzPrivileges(HiveOperation.CREATEDATABASE);
   private static final HiveAuthzPrivileges createFuncPrivileges =
       HiveAuthzPrivilegesMap.getHiveAuthzPrivileges(HiveOperation.CREATEFUNCTION);
+  private static final HiveAuthzPrivileges dropFuncPrivileges =
+          HiveAuthzPrivilegesMap.getHiveAuthzPrivileges(HiveOperation.DROPFUNCTION);
   private static final HiveAuthzPrivileges alterTabPrivileges =
       HiveAuthzPrivilegesMap.getHiveAuthzPrivileges(HiveOperation.ALTERTABLE_PROPERTIES);
 
@@ -282,10 +280,10 @@ public class TestHiveAuthzBindings {
    */
   @Test
   public void testValidateCreateFunctionForAdmin() throws Exception {
-    inputTabHierarcyList.add(buildObjectHierarchy(SERVER1, CUSTOMER_DB, PURCHASES_TAB, AGE_COL));
     inputTabHierarcyList.add(Arrays.asList(new DBModelAuthorizable[] {
         new Server(SERVER1), new AccessURI("file:///some/path/to/a/jar")
     }));
+    outputTabHierarcyList.add(buildObjectHierarchy(SERVER1, CUSTOMER_DB, null));
     testAuth.authorize(HiveOperation.CREATEFUNCTION, createFuncPrivileges, ADMIN_SUBJECT,
         inputTabHierarcyList, outputTabHierarcyList);
   }
@@ -294,6 +292,7 @@ public class TestHiveAuthzBindings {
     inputTabHierarcyList.add(Arrays.asList(new DBModelAuthorizable[] {
         new Server(SERVER1), new AccessURI("file:///path/to/some/lib/dir/my.jar")
     }));
+    outputTabHierarcyList.add(buildObjectHierarchy(SERVER1, ANALYST_DB, null));
     testAuth.authorize(HiveOperation.CREATEFUNCTION, createFuncPrivileges, ANALYST_SUBJECT,
         inputTabHierarcyList, outputTabHierarcyList);
   }
@@ -303,9 +302,11 @@ public class TestHiveAuthzBindings {
     inputTabHierarcyList.add(Arrays.asList(new DBModelAuthorizable[] {
         new Server(SERVER1), new AccessURI("file:///path/to/some/lib/dir/my.jar")
     }));
+    outputTabHierarcyList.add(buildObjectHierarchy(SERVER1, CUSTOMER_DB, null));
     testAuth.authorize(HiveOperation.CREATEFUNCTION, createFuncPrivileges, NO_SUCH_SUBJECT,
         inputTabHierarcyList, outputTabHierarcyList);
   }
+
   @Test(expected=AuthorizationException.class)
   public void testValidateCreateFunctionRejectionForUserWithoutURI() throws Exception {
     inputTabHierarcyList.add(Arrays.asList(new DBModelAuthorizable[] {
@@ -314,8 +315,39 @@ public class TestHiveAuthzBindings {
     inputTabHierarcyList.add(Arrays.asList(new DBModelAuthorizable[] {
         new Server(SERVER1), new AccessURI("file:///some/path/to/a.jar")
     }));
+    outputTabHierarcyList.add(buildObjectHierarchy(SERVER1, ANALYST_DB, null));
     testAuth.authorize(HiveOperation.CREATEFUNCTION, createFuncPrivileges, ANALYST_SUBJECT,
         inputTabHierarcyList, outputTabHierarcyList);
+  }
+
+  /**
+   * Validate drop function permission for admin (server level privilege)
+   */
+  @Test
+  public void testValidateDropFunctionForAdmin() throws Exception {
+    outputTabHierarcyList.add(Arrays.asList(new DBModelAuthorizable[] {
+        new Server(SERVER1), new Database(CUSTOMER_DB)
+    }));
+    testAuth.authorize(HiveOperation.DROPFUNCTION, dropFuncPrivileges, ADMIN_SUBJECT,
+        inputTabHierarcyList, outputTabHierarcyList);
+  }
+
+  @Test()
+  public void testValidateDropFunctionForJuniorAnalyst() throws Exception {
+    outputTabHierarcyList.add(Arrays.asList(new DBModelAuthorizable[] {
+            new Server(SERVER1), new Database(JUNIOR_ANALYST_DB)
+    }));
+    testAuth.authorize(HiveOperation.DROPFUNCTION, dropFuncPrivileges, JUNIOR_ANALYST_SUBJECT,
+            inputTabHierarcyList, outputTabHierarcyList);
+  }
+
+  @Test(expected=AuthorizationException.class)
+  public void testValidateDropFunctionForJuniorAnalystCantDropFunctionInAnalystDB() throws Exception {
+    outputTabHierarcyList.add(Arrays.asList(new DBModelAuthorizable[] {
+            new Server(SERVER1), new Database(ANALYST_DB)
+    }));
+    testAuth.authorize(HiveOperation.DROPFUNCTION, dropFuncPrivileges, JUNIOR_ANALYST_SUBJECT,
+            inputTabHierarcyList, outputTabHierarcyList);
   }
 
   /**
@@ -396,14 +428,6 @@ public class TestHiveAuthzBindings {
       if (table != null) {
         authList.add(new Table(table));
       }
-    }
-    return authList;
-  }
-
-  private List <DBModelAuthorizable>  buildObjectHierarchy(String server, String db, String table, String column) {
-    List <DBModelAuthorizable> authList = buildObjectHierarchy(server, db, table);
-    if (server != null && db != null && table != null && column != null) {
-      authList.add(new Column(column));
     }
     return authList;
   }

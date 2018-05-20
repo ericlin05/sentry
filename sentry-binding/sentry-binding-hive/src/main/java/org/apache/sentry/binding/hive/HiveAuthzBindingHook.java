@@ -222,12 +222,10 @@ public class HiveAuthzBindingHook extends HiveAuthzBindingHookBase {
           }
         }
 
-        // create/drop function is allowed with any database
-        currDB = Database.ALL;
+        currDB = extractDatabase((ASTNode)ast.getChild(0));
         break;
       case HiveParser.TOK_DROPFUNCTION:
-        // create/drop function is allowed with any database
-        currDB = Database.ALL;
+        currDB = extractDatabase((ASTNode)ast.getChild(0));
         break;
 
       case HiveParser.TOK_LOAD:

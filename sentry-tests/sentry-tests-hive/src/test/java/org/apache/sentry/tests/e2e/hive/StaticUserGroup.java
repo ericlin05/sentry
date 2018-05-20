@@ -27,6 +27,7 @@ public class StaticUserGroup {
       USER2_1 = "user2_1",
       USER3_1 = "user3_1",
       USER4_1 = "user4_1",
+      USER5_1 = "user5_1",
       HIVE = "hive",
       USERGROUP1 = "user_group1",
       USERGROUP2 = "user_group2",

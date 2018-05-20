@@ -108,6 +108,7 @@ public abstract class AbstractTestWithStaticConfiguration extends RulesForE2ETes
       USER2_1 = StaticUserGroup.USER2_1,
       USER3_1 = StaticUserGroup.USER3_1,
       USER4_1 = StaticUserGroup.USER4_1,
+      USER5_1 = StaticUserGroup.USER5_1,
       USERGROUP1 = StaticUserGroup.USERGROUP1,
       USERGROUP2 = StaticUserGroup.USERGROUP2,
       USERGROUP3 = StaticUserGroup.USERGROUP3,

@@ -453,6 +453,12 @@ public abstract class HiveAuthzBindingHookBase extends AbstractSemanticAnalyzerH
           outputHierarchy.add(entityHierarchy);
         }
       }
+      if (currDB != null) {
+        List<DBModelAuthorizable> externalAuthorizableHierarchy = new ArrayList<DBModelAuthorizable>();
+        externalAuthorizableHierarchy.add(hiveAuthzBinding.getAuthServer());
+        externalAuthorizableHierarchy.add(currDB);
+        outputHierarchy.add(externalAuthorizableHierarchy);
+      }
       break;
     case CONNECT:
       /* The 'CONNECT' is an implicit privilege scope currently used for

@@ -45,6 +45,7 @@ public class TestPrivilegesAtFunctionScope extends AbstractTestWithStaticConfigu
   private File dataFile;
   private PolicyFile policyFile;
   private final String tableName1 = "tb_1";
+  private final String tableName2 = "tb_2";
 
   @Before
   public void setup() throws Exception {
@@ -97,13 +98,19 @@ public class TestPrivilegesAtFunctionScope extends AbstractTestWithStaticConfigu
     statement.execute("INSERT INTO TABLE " + DB1 + "." + tableName1 + " VALUES (1, 'test1')");
     statement.execute("DROP TEMPORARY FUNCTION IF EXISTS printf_test");
     statement.execute("DROP TEMPORARY FUNCTION IF EXISTS printf_test_2");
+
+    statement.execute("USE " + DB2);
+    statement.execute("create table " + DB2 + "." + tableName2
+            + " (number INT comment 'column as a number', value STRING comment 'column as a string')");
     context.close();
 
     policyFile
         .addRolesToGroup(USERGROUP1, "db1_all", "UDF2_JAR", "UDF1_JAR", "UDF_JAR", "data_read")
-        .addRolesToGroup(USERGROUP2, "db1_tab1", "UDF_JAR")
-        .addRolesToGroup(USERGROUP3, "db1_tab1")
+        .addRolesToGroup(USERGROUP2, "db1_tab1", "UDF_JAR", "db2_all")
+        .addRolesToGroup(USERGROUP3, "db1_tab1", "UDF2_JAR", "UDF1_JAR", "UDF_JAR")
+        .addRolesToGroup(USERGROUP4, "db2_all")
         .addPermissionsToRole("db1_all", "server=server1->db=" + DB1)
+        .addPermissionsToRole("db2_all", "server=server1->db=" + DB2)
         .addPermissionsToRole("db1_tab1", "server=server1->db=" + DB1 + "->table=" + tableName1)
         .addPermissionsToRole("UDF_JAR", "server=server1->uri=file://" + udfLocation)
         .addPermissionsToRole("UDF1_JAR", "server=server1->uri=file://" + udf1Location)
@@ -113,69 +120,80 @@ public class TestPrivilegesAtFunctionScope extends AbstractTestWithStaticConfigu
   }
 
   /**
-   * Test the required permission to create/drop permanent function.
+   * User1 has db1 and URI privilege for the Jar and should be able create/drop the perm function.
+   *
    * @throws Exception
    */
   @Test
-  public void testCreateDropPermUdf() throws Exception {
+  public void testUser1CanCreateDropPermFunctionInDB1() throws Exception {
     setUpContext();
-    // user1 has URI privilege for the Jar and should be able create the perm function.
+    // Create function
     Connection connection = context.createConnection(USER1_1);
     Statement statement = context.createStatement(connection);
+    statement.execute("USE " + DB1);
 
-    statement.execute("CREATE FUNCTION db_2.test_1 AS 'org.apache.sentry.tests.e2e.hive.TestUDF'");
-    statement.close();
-    connection.close();
+    statement.execute("CREATE FUNCTION db_1.test_1 AS 'org.apache.sentry.tests.e2e.hive.TestUDF'");
+    statement.execute("DROP FUNCTION IF EXISTS test_1");
 
-    connection = context.createConnection(USER3_1);
-    statement = context.createStatement(connection);
-
-    // user3 does not have URI privilege but still should be able drop the perm function.
-    statement.execute("DROP FUNCTION IF EXISTS db_2.test_1");
-    statement.close();
-    connection.close();
+    context.close();
   }
 
   /**
-   * Test the required permission to create/drop temporary function.
+   * User1 should be able create/drop temp functions in DB1
+   *
    * @throws Exception
    */
   @Test
-  public void testCreateDropTempUdf() throws Exception {
+  public void testUser1CanCreateDropTempFunctionInDB1() throws Exception {
     setUpContext();
-    // user1 should be able create/drop temp functions
+    // Create temp function
     Connection connection = context.createConnection(USER1_1);
     Statement statement = context.createStatement(connection);
     statement.execute("USE " + DB1);
 
     statement.execute("CREATE TEMPORARY FUNCTION test_1 AS 'org.apache.sentry.tests.e2e.hive.TestUDF'");
-    statement.close();
-    connection.close();
+    statement.execute("DROP TEMPORARY FUNCTION IF EXISTS test_1");
 
-    // user3 shouldn't be able to create/drop temp functions since it doesn't have permission for jar
-    connection = context.createConnection(USER3_1);
-    statement = context.createStatement(connection);
-    statement.execute("USE " + DB1);
+    context.close();
+  }
+
+  /**
+   * User1 does not have access to DB2, create and drop functions should fail
+   *
+   * @throws Exception
+   */
+  @Test
+  public void testCreateDropPermUdfDb2() throws Exception {
+    setUpContext();
+    Connection connection = context.createConnection(USER1_1);
+    Statement statement = context.createStatement(connection);
+
     try {
-      statement.execute("CREATE TEMPORARY FUNCTION test_2 AS 'org.apache.sentry.tests.e2e.hive.TestUDF'");
-      assertFalse("CREATE TEMPORARY FUNCTION should fail for user3", true);
+      statement.execute("CREATE FUNCTION " + DB2 + ".test_1 AS 'org.apache.sentry.tests.e2e.hive.TestUDF'");
+      assertFalse("CREATE FUNCTION should fail for user1", true);
     } catch (SQLException e) {
       context.verifyAuthzException(e);
     }
-    statement.close();
-    connection.close();
 
-    connection = context.createConnection(USER3_1);
-    statement = context.createStatement(connection);
+    try {
+      statement.execute("DROP FUNCTION IF EXISTS " + DB2 + ".test_1");
+      assertFalse("DROP FUNCTION should fail for user1", true);
+    } catch (SQLException e) {
+      context.verifyAuthzException(e);
+    }
 
-    // user3 does not have URI privilege but still should be able drop the temp function.
-    statement.execute("DROP FUNCTION IF EXISTS test_2");
+    context.close();
   }
 
+  /**
+   * User1 should be able to create, run and drop functions in DB1,
+   * since he/she has full access
+   *
+   * @throws Exception
+   */
   @Test
-  public void testAndVerifyFuncPrivilegesPart1() throws Exception {
+  public void testUser1CanCreateRunAndDropFunctionsInDB1() throws Exception {
     setUpContext();
-    // user1 should be able create/drop temp functions
     Connection connection = context.createConnection(USER1_1);
     Statement statement = context.createStatement(connection);
     statement.execute("USE " + DB1);
@@ -189,117 +207,249 @@ public class TestPrivilegesAtFunctionScope extends AbstractTestWithStaticConfigu
       fail("fail to test temp func printf_test");
     }
 
-    statement.close();
-    connection.close();
-
-    connection = context.createConnection(USER1_1);
-    statement = context.createStatement(connection);
-    statement.execute("USE " + DB1);
     statement.execute("DROP TEMPORARY FUNCTION IF EXISTS printf_test");
 
     LOGGER.info("Testing select from perm func printf_test_perm");
     try {
       statement.execute(
-          "CREATE FUNCTION printf_test_perm AS 'org.apache.hadoop.hive.ql.udf.generic.GenericUDFPrintf' ");
+              "CREATE FUNCTION printf_test_perm AS 'org.apache.hadoop.hive.ql.udf.generic.GenericUDFPrintf' ");
       verifyPrintFuncValues(statement, "SELECT printf_test_perm('%s', value) FROM " + tableName1);
     } catch (Exception ex) {
       LOGGER.error("test perm func printf_test_perm failed with reason: ", ex);
       fail("Fail to test perm func printf_test_perm");
     }
 
-    statement.close();
-    connection.close();
-
-    connection = context.createConnection(USER1_1);
-    statement = context.createStatement(connection);
-    statement.execute("USE " + DB1);
     statement.execute("DROP FUNCTION IF EXISTS printf_test_perm");
 
-    // test perm UDF with 'using file' syntax
+    context.close();
+  }
+
+  /**
+   * User1 is able to create PERM function in DB1 using "USING FILE" syntax
+   *
+   * @throws Exception
+   */
+  @Test
+  public void testUser1CreateFunctionUsingFileSyntax() throws Exception {
+    setUpContext();
+    Connection connection = context.createConnection(USER1_1);
+    Statement statement = context.createStatement(connection);
+    statement.execute("USE " + DB1);
+
     LOGGER.info("Testing select from perm func printf_test_perm_use_file");
     try {
-      statement
-          .execute("CREATE FUNCTION printf_test_perm_use_file AS 'org.apache.hadoop.hive.ql.udf.generic.GenericUDFPrintf' "
+      statement.execute("CREATE FUNCTION " + DB1
+              + ".printf_test_perm_use_file AS 'org.apache.hadoop.hive.ql.udf.generic.GenericUDFPrintf' "
               + " using file 'file:///tmp'");
     } catch (Exception ex) {
       LOGGER.error("test perm func printf_test_perm_use_file failed with reason: ", ex);
       fail("Fail to test perm func printf_test_perm_use_file");
     } finally {
-      statement.execute("DROP FUNCTION IF EXISTS printf_test_perm_use_file");
+      statement.execute("DROP FUNCTION IF EXISTS " + DB1 + ".printf_test_perm_use_file");
     }
+
+    try {
+      String udfLocation = new File("../data/xudf.jar").getCanonicalPath();
+
+      statement.execute("CREATE FUNCTION "
+              + DB1 + ".xadd AS 'xudf.XAdd'"
+              + " using jar 'file://" + udfLocation + "'");
+      ResultSet rs = statement.executeQuery("select xadd(1)");
+      assertTrue(rs.next());
+      assertTrue(rs.getInt(1) == 1);
+    } catch (SQLException e) {
+      assertFalse("CREATE FUNCTION should succeed for user1:" + e, true);
+    } finally {
+      statement.execute("DROP FUNCTION " + DB1 + ".xadd");
+    }
+
     context.close();
   }
 
   @Test
-  public void testAndVerifyFuncPrivilegesPart2() throws Exception {
+  public void testUser2CantCreateFunctionUsingJarSyntaxInDB2DueToNoPermOnJarFileEvenHasAllAccessToDB2() throws Exception {
     setUpContext();
-    // user2 has select privilege on one of the tables in db1, should be able create/drop temp functions
+    Connection connection = context.createConnection(USER2_1);
+    Statement statement = context.createStatement(connection);
+    statement.execute("USE " + DB2);
+
+    try {
+      String udfLocation = new File("../data/xudf.jar").getCanonicalPath();
+
+      statement.execute("CREATE FUNCTION "
+                      + DB2 + ".xadd AS 'xudf.XAdd'"
+                      + " using jar 'file://" + udfLocation + "'");
+      assertFalse("CREATE FUNCTION should fail for user2 due to lack of permission on Jar file", true);
+    } catch (SQLException e) {
+      context.verifyAuthzException(e);
+    }
+
+    context.close();
+  }
+
+  /**
+   * User2 has ONLY SELECT privilege on table1 under db1, should NOT be able to create functions under db1
+   *
+   * @throws Exception
+   */
+  @Test
+  public void testUser2CantCreatePermOrTempFunctionsInDB1() throws Exception {
+    setUpContext();
     Connection connection = context.createConnection(USER2_1);
     Statement statement = context.createStatement(connection);
     statement.execute("USE " + DB1);
 
     try {
       statement.execute(
-          "CREATE TEMPORARY FUNCTION printf_test_2 AS 'org.apache.hadoop.hive.ql.udf.generic.GenericUDFPrintf'");
-      verifyPrintFuncValues(statement, "SELECT printf_test_2('%s', value) FROM " + tableName1);
+              "CREATE TEMPORARY FUNCTION printf_test_2 AS 'org.apache.hadoop.hive.ql.udf.generic.GenericUDFPrintf'");
+      assertFalse("CREATE TEMPORARY FUNCTION should fail for user2 on db1", true);
+    } catch (SQLException e) {
+      context.verifyAuthzException(e);
+    }
+
+    try {
+      statement.execute(
+          "CREATE FUNCTION " + DB1 + ".printf_test_2_perm AS 'org.apache.hadoop.hive.ql.udf.generic.GenericUDFPrintf'");
+      assertFalse("CREATE FUNCTION should fail for user2 on db1", true);
+    } catch (SQLException e) {
+      context.verifyAuthzException(e);
+    }
+
+    context.close();
+  }
+
+  /**
+   * User2 only has ALL privilege on db2, should be able to create function under db2
+   *
+   * @throws Exception
+   */
+  @Test
+  public void testUser2CanCreateRunAndDropFunctionInDB2() throws Exception {
+    setUpContext();
+    Connection connection = context.createConnection(USER2_1);
+    Statement statement = context.createStatement(connection);
+    statement.execute("USE " + DB2);
+
+    try {
+      statement.execute(
+              "CREATE TEMPORARY FUNCTION printf_test_2 AS 'org.apache.hadoop.hive.ql.udf.generic.GenericUDFPrintf'");
+      verifyPrintFuncValues(statement, "SELECT printf_test_2('%s', value) FROM " + tableName2);
     } catch (Exception ex) {
       LOGGER.error("test perm func printf_test_2 failed with reason: ", ex);
-      fail("Fail to test temp func printf_test_2");
+      fail("Fail to test temp func printf_test_2: " + ex.toString());
     } finally {
       statement.execute("DROP TEMPORARY FUNCTION IF EXISTS printf_test_2");
     }
 
     try {
       statement.execute(
-          "CREATE FUNCTION " + DB1 + ".printf_test_2_perm AS 'org.apache.hadoop.hive.ql.udf.generic.GenericUDFPrintf'");
-      verifyPrintFuncValues(statement, "SELECT printf_test_2_perm('%s', value) FROM " + tableName1);
+              "CREATE FUNCTION " + DB2 + ".printf_test_2_perm AS 'org.apache.hadoop.hive.ql.udf.generic.GenericUDFPrintf'");
+      verifyPrintFuncValues(statement, "SELECT " + DB2 + ".printf_test_2_perm('%s', value) FROM " + tableName2);
     } catch (Exception ex) {
       LOGGER.error("test perm func printf_test_2_perm failed with reason: ", ex);
-      fail("Fail to test temp func printf_test_2_perm");
+      fail("Fail to test temp func printf_test_2_perm: " + ex.toString());
     } finally {
-      statement.execute("DROP FUNCTION IF EXISTS printf_test_2_perm");
+      statement.execute("DROP FUNCTION IF EXISTS " + DB2 + ".printf_test_2_perm");
     }
 
-    // USER2 doesn't have URI perm on dataFile
-    try {
-      statement
-          .execute("CREATE FUNCTION "
-              + DB1
-              + ".printf_test_2_perm AS 'org.apache.hadoop.hive.ql.udf.generic.GenericUDFPrintf'"
-              + " using file '" + "file://" + dataFile.getPath() + "'");
-      assertFalse("CREATE TEMPORARY FUNCTION should fail for user3", true);
-    } catch (SQLException e) {
-      context.verifyAuthzException(e);
-    }
     context.close();
   }
 
+  /**
+   * User2 does not have permission on data file, create function should fail
+   *
+   * @throws Exception
+   */
   @Test
-  public void testAndVerifyFuncPrivilegesPart3() throws Exception {
+  public void testUser2CanNotCreateFunctionDueToDoesNotHaveURIPermOnDataFile() throws Exception {
     setUpContext();
-    // user3 shouldn't be able to create/drop temp functions since it doesn't have permission for jar
-    Connection connection = context.createConnection(USER3_1);
+    Connection connection = context.createConnection(USER2_1);
     Statement statement = context.createStatement(connection);
-    statement.execute("USE " + DB1);
+    statement.execute("USE " + DB2);
     try {
-      statement.execute(
-          "CREATE TEMPORARY FUNCTION printf_test_bad AS 'org.apache.hadoop.hive.ql.udf.generic.GenericUDFPrintf'");
-      assertFalse("CREATE TEMPORARY FUNCTION should fail for user3", true);
-    } catch (SQLException e) {
-      context.verifyAuthzException(e);
-    }
-
-    try {
-      statement.execute(
-          "CREATE FUNCTION printf_test_perm_bad AS 'org.apache.hadoop.hive.ql.udf.generic.GenericUDFPrintf'");
+      statement.execute("CREATE FUNCTION "
+                      + ".printf_test_2_perm AS 'org.apache.hadoop.hive.ql.udf.generic.GenericUDFPrintf'"
+                      + " using file '" + "file://" + dataFile.getPath() + "'");
       assertFalse("CREATE FUNCTION should fail for user3", true);
     } catch (SQLException e) {
       context.verifyAuthzException(e);
     }
+
     context.close();
-    // user4 (not part of any group ) shouldn't be able to create/drop temp functions
-    connection = context.createConnection(USER4_1);
-    statement = context.createStatement(connection);
+  }
+
+  /**
+   * User3 ONLY has access to table1 in DB1, but not write access to DB1 itself,
+   * should not be able to create function in DB1
+   *
+   * @throws Exception
+   */
+  @Test
+  public void testUser3CanNotCreateDropFunctionInDB1EvenThoughItHasAccessToTable1InDB1() throws Exception {
+    setUpContext();
+    Connection connection = context.createConnection(USER3_1);
+    Statement statement = context.createStatement(connection);
+    statement.execute("USE " + DB1);
+
+    try {
+      statement.execute("CREATE TEMPORARY FUNCTION test_2 AS 'org.apache.sentry.tests.e2e.hive.TestUDF'");
+      assertFalse("CREATE TEMPORARY FUNCTION should fail for user3", true);
+    } catch (SQLException e) {
+      context.verifyAuthzException(e);
+    }
+
+    try {
+      statement.execute("DROP FUNCTION IF EXISTS test_1");
+      assertFalse("DROP FUNCTION should fail for user3", true);
+    } catch (SQLException e) {
+      context.verifyAuthzException(e);
+    }
+
+    context.close();
+  }
+
+
+  /**
+   * User4 shouldn't be able to create/drop temp functions since it doesn't have permission for jar,
+   * even though he/she has ALL access to DB2
+   *
+   * @throws Exception
+   */
+  @Test
+  public void testUser4CanNotCreateDropFunctionInDB2DueToNoAccessToJarEvenThoughHasAllAccessToDB2() throws Exception {
+    setUpContext();
+    Connection connection = context.createConnection(USER4_1);
+    Statement statement = context.createStatement(connection);
+    statement.execute("USE " + DB2);
+    try {
+      statement.execute(
+              "CREATE TEMPORARY FUNCTION printf_test_bad AS 'org.apache.hadoop.hive.ql.udf.generic.GenericUDFPrintf'");
+      assertFalse("CREATE TEMPORARY FUNCTION should fail for user4", true);
+    } catch (SQLException e) {
+      context.verifyAuthzException(e);
+    }
+
+    try {
+      statement.execute(
+              "CREATE FUNCTION printf_test_perm_bad AS 'org.apache.hadoop.hive.ql.udf.generic.GenericUDFPrintf'");
+      assertFalse("CREATE FUNCTION should fail for user4", true);
+    } catch (SQLException e) {
+      context.verifyAuthzException(e);
+    }
+
+    context.close();
+  }
+
+  /**
+   * User5 (not part of any group) shouldn't be able to create/drop temp functions
+   *
+   * @throws Exception
+   */
+  @Test
+  public void testUser5CanNotCreateFunctionDueToNoGroupAssigned() throws Exception {
+    setUpContext();
+    Connection connection = context.createConnection(USER5_1);
+    Statement statement = context.createStatement(connection);
     try {
       statement.execute("USE default");
       statement.execute(
@@ -308,57 +458,7 @@ public class TestPrivilegesAtFunctionScope extends AbstractTestWithStaticConfigu
     } catch (SQLException e) {
       context.verifyAuthzException(e);
     }
-    context.close();
-  }
 
-  /**
-   * Test create function using jar functionality
-   * @throws Exception
-   */
-  @Test
-  public void testAndVerifyFuncPrivilegesPart4() throws Exception {
-    setUpContext();
-    Connection connection = context.createConnection(USER1_1);
-    Statement statement = context.createStatement(connection);
-    statement.execute("USE " + DB1);
-
-    // USER1 has URI perm on jarFiles
-    try {
-      String udfLocation = new File("../data/xudf.jar").getCanonicalPath();
-
-      statement
-          .execute("CREATE FUNCTION "
-              + DB1
-              + ".xadd AS 'xudf.XAdd'"
-              + " using jar 'file://" + udfLocation + "'");
-      ResultSet rs = statement.executeQuery("select xadd(1)");
-      assertTrue(rs.next());
-      assertTrue(rs.getInt(1) == 1);
-    } catch (SQLException e) {
-      assertFalse("CREATE FUNCTION should succeed for user1:" + e, true);
-    } finally {
-      connection.close();
-    }
-
-    connection = context.createConnection(USER2_1);
-    statement = context.createStatement(connection);
-    statement.execute("USE " + DB1);
-
-    // USER2 doesn't have URI perm on jarFiles
-    try {
-      String udfLocation = new File("../data/xudf.jar").getCanonicalPath();
-
-      statement
-          .execute("CREATE FUNCTION "
-              + DB1
-              + ".xadd AS 'xudf.XAdd'"
-              + " using jar 'file://" + udfLocation + "'");
-      assertFalse("CREATE FUNCTION should fail for user2", true);
-    } catch (SQLException e) {
-      context.verifyAuthzException(e);
-    } finally {
-      connection.close();
-    }
     context.close();
   }
 
