@@ -23,7 +23,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-import com.codahale.metrics.Timer.Context;
+import sentry.com.codahale.metrics.Timer.Context;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.sentry.hdfs.service.thrift.SentryHDFSService;
 import org.apache.sentry.hdfs.service.thrift.TAuthzUpdateRequest;
@@ -117,7 +117,7 @@ public class SentryHDFSServiceProcessor implements SentryHDFSService.Iface {
    */
   private List<TPathsUpdate> getPathsUpdatesFrom(TAuthzUpdateRequest request) throws Exception {
     LOGGER.debug("PATHS updates requested from HDFS [ImgNum={}, SeqNum={}]",
-          request.getPathSeqNum(), request.getPathImgNum());
+        request.getPathImgNum(), request.getPathSeqNum());
 
     // If another paths updates request is in progress by another HDFS NameNode, then we
     // return an empty image for now to avoid a large memory consumption
